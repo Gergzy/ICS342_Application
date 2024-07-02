@@ -225,7 +225,7 @@ fun ExampleAlertDialog(
         onDismissRequest = {  },
         confirmButton = {
             TextButton(onClick = onCancel) {
-                Text(text = "Okay")
+                Text(text = "Okay.")
             }
         },
         dismissButton = {
@@ -241,3 +241,4 @@ fun ExampleAlertDialog(
         }
     )
 }
+
