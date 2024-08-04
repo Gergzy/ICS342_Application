@@ -1,6 +1,7 @@
 package com.example.myapplicationpackage
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -37,7 +38,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,42 +45,72 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.example.myapplicationpackage.ui.theme.My_Application_342Theme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val sharedPreferencesHelper = SharedPreferencesHelper(this)
+        val apiService = RetrofitInstance.apiService
+        val loginViewModel = LoginViewModel(sharedPreferencesHelper, apiService, this)
+        val createAccountViewModel = CreateAccountViewModel(sharedPreferencesHelper, apiService, this)
+        val mainViewModel = MainViewModel(sharedPreferencesHelper, apiService, this)
+
         enableEdgeToEdge()
         setContent {
             My_Application_342Theme {
-                ScaffoldExample()
+                val navController = rememberNavController()
+                NavHost(navController = navController, startDestination = "LoginScreen") {
+                    composable("LoginScreen") {
+                        LoginScreen(
+                            onLoginSuccess = { navController.navigate("ToDoListScreen") },
+                            onCreateAccountClick = { navController.navigate("CreateAccountScreen") },
+                            viewModel = loginViewModel)
+                    }
+                    composable("ToDoListScreen") {
+                        mainViewModel.loadTodos(sharedPreferencesHelper)
+                        ToDoListScreen(mainViewModel, sharedPreferencesHelper)
+                    }
+                    composable("CreateAccountScreen") {
+                        CreateAccountScreen(
+                            onCreateAccountSuccess = { navController.navigate("ToDoListScreen") },
+                            onLoginClick = { navController.navigate("LoginScreen") },
+                            viewModel = createAccountViewModel)
+                    }
+                }
             }
         }
     }
 }
 
-
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScaffoldExample() {
-    val toDoList = remember {
-        mutableStateListOf<String>()
-    }
+fun ToDoListScreen(viewModel: MainViewModel, sharedPreferences: SharedPreferencesHelper) {
+    val context = LocalContext.current
+    val toDoList by viewModel.todos.observeAsState()
     val sheetState = rememberModalBottomSheetState()
     var text by remember { mutableStateOf("") }
-    var isSheetOpen by rememberSaveable {
-        mutableStateOf(false)
-    }
-    var showAlertDialog by remember {
-        mutableStateOf(false)
-    }
+    var isSheetOpen by rememberSaveable { mutableStateOf(false) }
+    val showError by viewModel.showError.observeAsState(false)
+    val errorMessage by viewModel.errorMessage.observeAsState("")
 
-    if (showAlertDialog) {
-        ExampleAlertDialog(
-            onCancel = {showAlertDialog = false},
+
+    if (showError) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onShowErrorChange(false) },
+            title = { Text(text = context.getString(R.string.error)) },
+            text = { Text(text = errorMessage) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.onShowErrorChange(false) }) {
+                    Text(text = context.getString(R.string.okay))
+                }
+            }
         )
     }
     if (isSheetOpen) {
@@ -100,11 +130,11 @@ fun ScaffoldExample() {
                 ) {
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("New Todo")},
+                        label = { Text(context.getString(R.string.new_todo))},
                         value = text,
                         onValueChange = { text = it },
                         trailingIcon = {
-                            Icon(imageVector = Icons.Filled.Clear , contentDescription = "Clear Text")
+                            Icon(imageVector = Icons.Filled.Clear , contentDescription = context.getString(R.string.clear_text))
                             IconButton(onClick = { text = ""}) {
                             }
                         }
@@ -122,17 +152,19 @@ fun ScaffoldExample() {
                     Button(
                         onClick = {
                             if (text!= "") {
-                                toDoList.add(text)
+                                val todoitem = TodoItem("", text, false)
+                                viewModel.addTodo(todoitem,sharedPreferences)
                                 text = ""
                                 isSheetOpen = false
                             } else {
-                                showAlertDialog = true
+                                viewModel.onErrorMessage(context.getString(R.string.blank_error_message))
+                                viewModel.onShowErrorChange(true)
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
                     )
                     {
-                        Text("Save")
+                        Text(context.getString(R.string.save))
                     }
                 }
                 Box(modifier = Modifier
@@ -147,12 +179,12 @@ fun ScaffoldExample() {
                 ) {
                     OutlinedButton(
                         onClick = { isSheetOpen = false
-                                    text = ""
-                                  },
+                            text = ""
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                     {
-                        Text("Cancel")
+                        Text(context.getString(R.string.cancel))
                     }
                 }
             }
@@ -170,7 +202,7 @@ fun ScaffoldExample() {
                 title = {
                     Box(modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
-                    ) {Text("Todo")}
+                    ) {Text(context.getString(R.string.todo))}
                 }
             )
         },
@@ -178,7 +210,7 @@ fun ScaffoldExample() {
             FloatingActionButton(onClick = {
                 isSheetOpen = true
             }) {
-                Icon(Icons.Default.Add, contentDescription = "Add")
+                Icon(Icons.Default.Add, contentDescription = context.getString(R.string.add))
             }
         }
     ) { innerPadding ->
@@ -186,8 +218,15 @@ fun ScaffoldExample() {
             modifier = Modifier
                 .padding(innerPadding)
         ) {
-            items(toDoList) {item ->
-                ItemView(content = item)
+            toDoList?.let {list ->
+                items(list) { todo ->
+                    ItemView(
+                        content = todo,
+                        onToggle = {
+                            viewModel.updateCheckBox(todo, sharedPreferences)
+                        }
+                    )
+                }
             }
         }
     }
@@ -195,9 +234,7 @@ fun ScaffoldExample() {
 
 
 @Composable
-fun ItemView(content: String) {
-    val viewModel: MainViewModel = viewModel()
-    val checkedState = viewModel.currentCheckState.observeAsState(false)
+fun ItemView(content: TodoItem, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -209,36 +246,194 @@ fun ItemView(content: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = content,
+        Text(text = content.description,
             modifier = Modifier
                 .padding(start = 8.dp)
-            )
-        Checkbox(checked = checkedState.value, onCheckedChange = {viewModel.onChange(it)})
+        )
+        Checkbox(
+            checked = content.completed,
+            onCheckedChange = {
+                onToggle()})
+    }
+}
+@Composable
+fun LoginScreen(
+    onLoginSuccess: () -> Unit,
+    onCreateAccountClick: () -> Unit,
+    viewModel: LoginViewModel = viewModel()
+) {
+    val context = LocalContext.current
+    val email by viewModel.email.observeAsState("")
+    val password by viewModel.password.observeAsState("")
+    val showError by viewModel.showError.observeAsState(false)
+    val errorMessage by viewModel.errorMessage.observeAsState("")
+
+    if (showError) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onShowErrorChange(false) },
+            title = { Text(text = context.getString(R.string.error)) },
+            text = { Text(text = errorMessage) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.onShowErrorChange(false) }) {
+                    Text(text = context.getString(R.string.okay))
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        OutlinedTextField(
+            value = email,
+            onValueChange = { viewModel.onEmailChange(it) },
+            label = { Text(text = context.getString(R.string.email)) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { viewModel.onPasswordChange(it) },
+            label = { Text(text = context.getString(R.string.password)) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = {
+                if (email.isNotBlank() && password.isNotBlank()) {
+                    viewModel.login(
+                        onSuccess = onLoginSuccess,
+                        onError = { message ->
+                            viewModel.onErrorMessage(message)
+                            viewModel.onShowErrorChange(true)
+                        }
+                    )
+                } else {
+                    viewModel.onErrorMessage(context.getString(R.string.empty_fields_error))
+                    viewModel.onShowErrorChange(true)
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+        ) {
+            Text(text = context.getString(R.string.login_button))
+        }
+        TextButton(
+            onClick = onCreateAccountClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+        ) {
+            Text(text = context.getString(R.string.create_account_button))
+        }
     }
 }
 
 @Composable
-fun ExampleAlertDialog(
-    onCancel: () -> Unit,
+fun CreateAccountScreen(
+    onCreateAccountSuccess: () -> Unit,
+    onLoginClick: () -> Unit,
+    viewModel: CreateAccountViewModel = viewModel()
 ) {
-    AlertDialog(
-        onDismissRequest = {  },
-        confirmButton = {
-            TextButton(onClick = onCancel) {
-                Text(text = "Okay.")
+    val context = LocalContext.current
+    val name by viewModel.name.observeAsState("")
+    val email by viewModel.email.observeAsState("")
+    val password by viewModel.password.observeAsState("")
+    val showError by viewModel.showError.observeAsState(false)
+    val errorMessage by viewModel.errorMessage.observeAsState("")
+    val showSuccess by viewModel.showSuccess.observeAsState(false)
+
+    if (showError) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onShowErrorChange(false) },
+            title = { Text(text = context.getString(R.string.error)) },
+            text = { Text(text = errorMessage) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearError() }) {
+                    Text(text = context.getString(R.string.okay))
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text(text = "Cancel")
+        )
+    }
+
+    if (showSuccess) {
+        AlertDialog(
+            onDismissRequest = { viewModel.clearSuccess() },
+            title = { Text(text = context.getString(R.string.success)) },
+            text = { Text(text = context.getString(R.string.account_creation_success)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearSuccess()
+                    onCreateAccountSuccess()
+                }) {
+                    Text(text = context.getString(R.string.okay))
+                }
             }
-        },
-        title = {
-            Text(text = "Error")
-        },
-        text = {
-            Text(text = "An entry on the to do list can not be blank.")
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = {viewModel.onNameChange(it)},
+            label = { Text(text = context.getString(R.string.name))},
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = email,
+            onValueChange = { viewModel.onEmailChange(it) },
+            label = { Text(text = context.getString(R.string.email)) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { viewModel.onPasswordChange(it) },
+            label = { Text(text = context.getString(R.string.password)) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = {
+                if (email.isNotBlank() && password.isNotBlank() && name.isNotBlank()) {
+                    viewModel.createAccount(
+                        onSuccess = { viewModel.onShowSuccessChange(true) },
+                        onError = { message ->
+                            viewModel.onErrorMessage(message)
+                        }
+                    )
+                } else {
+                    viewModel.onErrorMessage(context.getString(R.string.create_account_empty_fields_error))
+                    viewModel.onShowErrorChange(true)
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+        ) {
+            Text(text = context.getString(R.string.create_account_button))
         }
-    )
+        TextButton(
+            onClick = onLoginClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+        ) {
+            Text(text = context.getString(R.string.login_button))
+        }
+    }
 }
+
+
+
+
+
+
 
