@@ -90,6 +90,13 @@ class LoginViewModel(private var sharedPreferences: SharedPreferencesHelper, pri
 
     private val _errorMessage = MutableLiveData("")
     val errorMessage: LiveData<String> = _errorMessage
+
+    private val _showSuccess = MutableLiveData(false)
+    val showSuccess: LiveData<Boolean> = _showSuccess
+
+    fun onShowSuccessChange(showSuccessChange: Boolean) {
+        _showSuccess.value = showSuccessChange
+    }
     fun onEmailChange(newEmail: String) {
         _email.value = newEmail
     }
@@ -124,7 +131,7 @@ class LoginViewModel(private var sharedPreferences: SharedPreferencesHelper, pri
         }
     }
 }
-class CreateAccountViewModel(var SharedPreferences: SharedPreferencesHelper, private val apiService: ApiService, private val context: Context) : ViewModel() {
+class CreateAccountViewModel(private var SharedPreferences: SharedPreferencesHelper, private val apiService: ApiService, private val context: Context) : ViewModel() {
     private val apiKey = "a37f8036-f0d2-42f0-9300-d2c9cbdbe723"
 
     private val _name = MutableLiveData("")
